@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Story Forge</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="/static/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body x-data="app()" x-init="init()">
+
+<header class="topbar">
+  <a href="#/" class="brand">🎲 Story Forge</a>
+  <template x-if="view === 'world' && world">
+    <div class="topbar-world">
+      <span class="crumb" x-text="world.name"></span>
+      <nav class="tabs">
+        <a :href="`#/w/${worldId}/build`" :class="{ active: mode === 'build' }">🛠 World builder</a>
+        <a :href="`#/w/${worldId}/play`" :class="{ active: mode === 'play', disabled: world.status !== 'ready' }">⚔ Play</a>
+      </nav>
+    </div>
+  </template>
+</header>
+
+<div class="login-wrap" x-show="health && !health.auth" x-cloak>
+  <div class="login panel">
+    <h3>Connect your Claude account</h3>
+    <p class="muted">Story Forge runs on your Claude subscription (Pro or Max). You only need to do this once per device.</p>
+    <template x-if="!login.url">
+      <button class="btn primary" :disabled="login.busy" @click="loginStart()"
+              x-text="login.busy ? 'Preparing sign-in link…' : 'Connect Claude account'"></button>
+    </template>
+    <template x-if="login.url">
+      <div>
+        <ol>
+          <li>Open <a :href="login.url" target="_blank" rel="noopener">the Claude sign-in page</a> and approve access.</li>
+          <li>Copy the code it shows you and paste it here:</li>
+        </ol>
+        <form class="login-form" @submit.prevent="loginFinish()">
+          <input x-model="login.code" placeholder="Paste the code" autocomplete="off" :disabled="login.busy">
+          <button class="btn primary" :disabled="login.busy || !login.code.trim()"
+                  x-text="login.busy ? 'Connecting…' : 'Finish'"></button>
+        </form>
+        <button class="btn ghost small" @click="login.url = null" :disabled="login.busy">Start over</button>
+      </div>
+    </template>
+    <p class="login-error" x-show="login.error" x-text="login.error"></p>
+  </div>
+</div>
+
+<!-- Home: list of worlds -->
+<main class="home" x-show="view === 'home'" x-cloak>
+  <div class="home-head">
+    <h1>Your worlds</h1>
+    <div class="actions">
+      <button class="btn" @click="$refs.importFile.click()" :disabled="importing"
+              x-text="importing ? 'Importing…' : 'Import world'"></button>
+      <input type="file" accept=".zip" x-ref="importFile" hidden @change="importWorld($event)">
+      <button class="btn primary" @click="createWorld()">+ New world</button>
+    </div>
+  </div>
+  <p class="empty" x-show="!worlds.length">
+    No worlds yet. Create one, and the world builder will interview you about the setting, rules and your character.
+  </p>
+  <div class="grid">
+    <template x-for="w in worlds" :key="w.id">
+      <article class="card">
+        <div class="card-top">
+          <span class="badge" :class="w.status" x-text="w.status === 'ready' ? 'Ready' : 'In setup'"></span>
+          <span class="genre" x-text="w.genre"></span>
+        </div>
+        <h3 x-text="w.name"></h3>
+        <p class="tagline" x-text="w.tagline || 'Not described yet'"></p>
+        <div class="actions">
+          <a class="btn primary" :href="`#/w/${w.id}/${w.status === 'ready' ? 'play' : 'build'}`"
+             x-text="w.status === 'ready' ? 'Play' : 'Continue setup'"></a>
+          <a class="btn" x-show="w.status === 'ready'" :href="`#/w/${w.id}/build`">Edit world</a>
+          <a class="btn ghost" :href="`/api/worlds/${w.id}/export`" title="Download as .zip">Export</a>
+          <button class="btn ghost danger" @click="deleteWorld(w)">Delete</button>
+        </div>
+      </article>
+    </template>
+  </div>
+</main>
+
+<!-- World: chat + side panel -->
+<main class="world" x-show="view === 'world'" x-cloak>
+  <section class="chat">
+    <div class="log" x-ref="log">
+      <template x-if="!messages.length && mode === 'build'">
+        <div class="msg gm intro">
+          <div class="body">
+            <p><strong>Let's build a new world together.</strong></p>
+            <p>Describe what you want to play: the setting, the vibe, who you'd like to be. One sentence is enough
+              ("a vampire fledgling in modern Prague") or write as much as you like.
+              I'll ask a few questions, then write the rules, scripts and starting state.</p>
+          </div>
+        </div>
+      </template>
+      <template x-if="!messages.length && mode === 'play'">
+        <div class="begin">
+          <p x-text="world?.tagline"></p>
+          <button class="btn primary big" :disabled="busy" @click="beginAdventure()">Begin the adventure</button>
+        </div>
+      </template>
+
+      <template x-for="(m, i) in messages" :key="i">
+        <div class="msg" :class="m.role">
+          <div class="body" x-html="md(m.text)"></div>
+          <template x-if="m.tools && m.tools.length">
+            <details class="tools">
+              <summary x-text="`⚙ ${m.tools.length} action${m.tools.length > 1 ? 's' : ''}`"></summary>
+              <template x-for="t in m.tools">
+                <div class="tool">
+                  <code x-text="`${t.name}: ${t.input}`"></code>
+                  <pre x-show="t.output" x-text="t.output"></pre>
+                </div>
+              </template>
+            </details>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="live">
+        <div class="msg gm live">
+          <template x-for="a in live.asides"><div class="aside" x-html="md(a)"></div></template>
+          <template x-if="live.tools.length">
+            <div class="activity">
+              <span class="spinner" x-show="!live.text"></span>
+              <span x-text="`⚙ ${toolLabel(live.tools[live.tools.length - 1])}`"></span>
+              <span class="count" x-show="live.tools.length > 1" x-text="`(${live.tools.length} actions)`"></span>
+            </div>
+          </template>
+          <div class="body" x-show="live.text" x-html="md(live.text)"></div>
+          <div class="typing" x-show="!live.text && !live.tools.length"><span></span><span></span><span></span></div>
+        </div>
+      </template>
+    </div>
+
+    <form class="composer" @submit.prevent="send()">
+      <textarea x-model="input" x-ref="input" rows="2" :disabled="busy"
+                :placeholder="mode === 'build' ? 'Describe your world, answer questions, or ask for changes…' : 'What do you do?  (ooc: … talks to the GM)'"
+                @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); send() }"></textarea>
+      <button class="btn primary" :disabled="busy || !input.trim()">Send</button>
+    </form>
+  </section>
+
+  <aside class="side">
+    <!-- Builder side: setup checklist and files -->
+    <template x-if="mode === 'build' && world">
+      <div>
+        <div class="panel">
+          <h4>World setup</h4>
+          <ul class="checklist">
+            <template x-for="(label, key) in setupLabels" :key="key">
+              <li :class="{ done: world.setup && world.setup[key] }">
+                <span x-text="world.setup && world.setup[key] ? '✅' : '⬜'"></span>
+                <span x-text="label"></span>
+              </li>
+            </template>
+          </ul>
+          <a class="btn primary wide" x-show="world.status === 'ready'" :href="`#/w/${worldId}/play`">Start playing →</a>
+        </div>
+        <div class="panel" x-show="world.ui_wishes && world.ui_wishes.length">
+          <h4>On-screen wishes</h4>
+          <ul class="plain"><template x-for="w in world.ui_wishes"><li x-text="w"></li></template></ul>
+        </div>
+        <div class="panel" x-show="files.length">
+          <h4>World files</h4>
+          <ul class="files"><template x-for="f in files"><li x-text="f"></li></template></ul>
+        </div>
+      </div>
+    </template>
+
+    <!-- Play side: generic state panel -->
+    <template x-if="mode === 'play'">
+      <div>
+        <template x-if="state && state.player">
+          <div class="panel">
+            <h4><span x-text="state.player.data.icon || '🧑'"></span> <span x-text="state.player.name"></span></h4>
+            <dl class="stats">
+              <template x-for="[k, v] in statEntries(state.player.data)" :key="k">
+                <div><dt x-text="k"></dt><dd x-text="v"></dd></div>
+              </template>
+            </dl>
+          </div>
+        </template>
+        <template x-if="state && state.location">
+          <div class="panel">
+            <h4>📍 <span x-text="state.location.name"></span></h4>
+            <p class="muted" x-text="state.location.data.description"></p>
+          </div>
+        </template>
+        <template x-if="state && state.inventory.length">
+          <div class="panel">
+            <h4>🎒 Inventory</h4>
+            <ul class="inventory">
+              <template x-for="it in state.inventory" :key="it.id">
+                <li :title="it.data.description || ''">
+                  <span class="icon" x-text="it.data.icon || '•'"></span>
+                  <span x-text="it.name"></span>
+                  <span class="qty" x-show="(it.data.qty ?? 1) > 1" x-text="`×${it.data.qty}`"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </template>
+        <template x-if="state && state.quests.length">
+          <div class="panel">
+            <h4>📜 Quests</h4>
+            <ul class="plain">
+              <template x-for="q in state.quests" :key="q.id">
+                <li><strong x-text="q.name"></strong><div class="muted" x-text="q.data.summary || ''"></div></li>
+              </template>
+            </ul>
+          </div>
+        </template>
+        <template x-if="state && state.events.length">
+          <div class="panel">
+            <h4>🕮 Recent events</h4>
+            <ul class="plain small"><template x-for="e in state.events"><li x-text="e"></li></template></ul>
+          </div>
+        </template>
+        <p class="muted" x-show="!state">The world has no state yet.</p>
+      </div>
+    </template>
+  </aside>
+</main>
+</body>
+</html>

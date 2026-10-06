@@ -1,0 +1,19 @@
+﻿name: storyforge
+
+services:
+  storyforge:
+    image: ghcr.io/owner/repo:latest   # prebuilt by GitHub Actions; `docker compose build` builds it locally
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:                            # optional: CLAUDE_MODEL=sonnet, or a token instead of the in-app login
+      - path: .env
+        required: false
+    volumes:
+      - worlds:/app/worlds               # your worlds (export/import them as .zip from the web UI)
+      - claude-home:/home/player/.claude # Claude login + conversation history
+    restart: unless-stopped
+
+volumes:
+  worlds:
+  claude-home:
