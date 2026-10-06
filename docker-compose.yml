@@ -1,8 +1,8 @@
-﻿name: storyforge
+name: storyforge
 
 services:
   storyforge:
-    image: ghcr.io/owner/repo:latest   # prebuilt by GitHub Actions; `docker compose build` builds it locally
+    image: ghcr.io/ll0xx/rpg:latest   # prebuilt by GitHub Actions; `docker compose build` builds it locally
     build: .
     ports:
       - "8000:8000"
