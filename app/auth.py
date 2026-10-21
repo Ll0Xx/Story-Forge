@@ -30,6 +30,10 @@ CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 CODEX_AUTH_FILE = CODEX_HOME / "auth.json"
 
+# Each CLI only gets its own provider's credentials, so neither AI can read the other's key with `env`.
+CLAUDE_SECRETS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
+CODEX_SECRETS = ("CODEX_API_KEY", "OPENAI_API_KEY")
+
 _CURSOR_FORWARD = re.compile(r"\x1b\[\d*C")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>]")
 _URL = re.compile(r"https://\S+/oauth/authorize\?\S+")
@@ -80,12 +84,20 @@ def default_provider() -> str:
     return next((p for p in PROVIDERS if connected(p)), "claude")
 
 
+def _env_without(*names: str) -> dict:
+    return {k: v for k, v in os.environ.items() if k not in names}
+
+
 def claude_env() -> dict:
-    env = dict(os.environ)
+    env = _env_without(*CODEX_SECRETS)
     t = token()
     if t:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = t
     return env
+
+
+def codex_env() -> dict:
+    return _env_without(*CLAUDE_SECRETS)
 
 
 def logout(provider: str) -> None:
@@ -114,7 +126,7 @@ class ClaudeLogin:
             if pid == 0:
                 # Wide terminal so the URL and token are printed on one line.
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 4000, 0, 0))
-                env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_OAUTH_TOKEN"}
+                env = _env_without("CLAUDE_CODE_OAUTH_TOKEN", *CODEX_SECRETS)
                 os.execvpe(CLAUDE_BIN, [CLAUDE_BIN, "setup-token"], env)
             self.pid, self.fd, self.output = pid, fd, ""
             url = self._read_until(_URL, timeout=30)
@@ -193,7 +205,7 @@ class CodexLogin:
         with self.lock:
             self._stop()
             CODEX_HOME.mkdir(parents=True, exist_ok=True)
-            env = {k: v for k, v in os.environ.items() if k != "CODEX_API_KEY"}
+            env = _env_without(*CLAUDE_SECRETS, *CODEX_SECRETS)
             self.proc = subprocess.Popen(
                 [CODEX_BIN, "login", "--device-auth"], env=env,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

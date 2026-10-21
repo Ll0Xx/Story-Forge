@@ -5,7 +5,7 @@ services:
     image: ghcr.io/ll0xx/rpg:latest   # prebuilt by GitHub Actions; `docker compose build` builds it locally
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"            # this computer only: the app has no password and holds your AI logins
     env_file:                            # optional: models, or tokens instead of the in-app login
       - path: .env
         required: false

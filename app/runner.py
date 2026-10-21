@@ -166,7 +166,7 @@ async def _run_codex(cwd: Path, mode: str, prompt: str, session_id: str | None) 
         opts += ["-m", CODEX_MODEL]
     args = [CODEX_BIN, "exec", "resume", *opts, session_id, "-"] if session_id else [CODEX_BIN, "exec", *opts, "-"]
 
-    proc, stderr_task = await _spawn(args, cwd, dict(os.environ), prompt)
+    proc, stderr_task = await _spawn(args, cwd, auth.codex_env(), prompt)
     got_result = False
     reply: list[str] = []  # agent messages since the last tool call: the final reply
     last_error = ""
