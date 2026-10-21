@@ -10,6 +10,8 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+from . import auth
+
 WORLDS_DIR = Path(os.environ.get("WORLDS_DIR", "/app/worlds"))
 SETUP_KEYS = ["setting", "tone", "rules", "combat", "character", "ui", "scripts"]
 _ID_RE = re.compile(r"^[a-z0-9-]{1,64}$")
@@ -33,10 +35,11 @@ def _new_dir() -> Path:
     return d
 
 
-def create() -> dict:
+def create(ai: str) -> dict:
     d = _new_dir()
     for sub in ("rules", "scripts", "memory", ".chat"):
         (d / sub).mkdir()
+    write_sessions(d, {"provider": ai})
     meta = {
         "name": "New world",
         "tagline": "",
@@ -60,6 +63,7 @@ def read_meta(d: Path) -> dict:
     meta.setdefault("status", "building")
     meta.setdefault("setup", {})
     meta["id"] = d.name
+    meta["provider"] = provider(d)
     meta["updated"] = _last_activity(d)
     return meta
 
@@ -81,8 +85,9 @@ def delete(d: Path) -> None:
 
 
 # ---- export / import -------------------------------------------------------
-# Claude sessions live in the claude-home volume and can't move between machines, so
+# Conversations live in the claude-home / codex-home volumes and can't move between machines, so
 # .sessions.json is left out; the GM rebuilds context from WORLD.md, recap and world.db.
+# An imported world uses whichever provider is connected on the new device.
 
 def _exportable(rel: Path) -> bool:
     return rel.name != ".sessions.json" and "__pycache__" not in rel.parts
@@ -129,6 +134,7 @@ def import_zip(data: bytes) -> dict:
 
 
 # ---- sessions (engine-owned) ----------------------------------------------
+# .sessions.json: {"provider": "claude" | "codex", "build": <session id>, "play": <session id>}
 
 def read_sessions(d: Path) -> dict:
     try:
@@ -139,6 +145,19 @@ def read_sessions(d: Path) -> dict:
 
 def write_sessions(d: Path, sessions: dict) -> None:
     (d / ".sessions.json").write_text(json.dumps(sessions, indent=2), encoding="utf-8")
+
+
+def provider(d: Path) -> str:
+    s = read_sessions(d)
+    if s.get("provider") in auth.PROVIDERS:
+        return s["provider"]
+    # Worlds from before Codex support only had Claude sessions.
+    return "claude" if s.get("build") or s.get("play") else auth.default_provider()
+
+
+def set_provider(d: Path, new: str) -> None:
+    """Switching drops the old conversations; the new GM restores context from the world files."""
+    write_sessions(d, {"provider": new})
 
 
 # ---- chat log --------------------------------------------------------------

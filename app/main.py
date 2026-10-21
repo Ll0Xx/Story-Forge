@@ -1,7 +1,6 @@
 """Story Forge web server: REST for worlds, WebSocket for live turns."""
 import asyncio
 import re
-import uuid
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from . import auth, runner, worlds
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MODES = ("build", "play")
 MAX_IMPORT_BYTES = 200 * 1024 * 1024
+PROVIDER_NAMES = {"claude": "Claude", "codex": "ChatGPT"}
 LOST_SESSION_NOTE = (
     "(Engine note: the previous conversation was lost. Before replying, re-read WORLD.md, "
     "memory/recap.md and `python3 -m db summary` to restore context.)\n\n"
@@ -41,30 +41,72 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+def _provider_or_400(provider: str) -> str:
+    if provider not in auth.PROVIDERS:
+        raise HTTPException(400, "unknown provider")
+    return provider
+
+
 @app.get("/api/health")
 def health():
-    return {"auth": auth.logged_in(), "model": runner.CLAUDE_MODEL or "default"}
+    return {"providers": auth.status()}
 
 
 class LoginCode(BaseModel):
     code: str
 
 
-@app.post("/api/login/start")
-def login_start():
+@app.post("/api/login/claude/start")
+def claude_login_start():
     try:
-        return {"url": auth.login_flow.start()}
+        return {"url": auth.claude_login.start()}
     except auth.LoginError as e:
         raise HTTPException(502, str(e))
 
 
-@app.post("/api/login/finish")
-def login_finish(body: LoginCode):
+@app.post("/api/login/claude/finish")
+def claude_login_finish(body: LoginCode):
     try:
-        auth.login_flow.finish(body.code)
+        auth.claude_login.finish(body.code)
     except auth.LoginError as e:
         raise HTTPException(400, str(e))
-    return {"auth": auth.logged_in()}
+    return {"providers": auth.status()}
+
+
+@app.post("/api/login/codex/start")
+def codex_login_start():
+    try:
+        return auth.codex_login.start()
+    except auth.LoginError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/login/codex/status")
+def codex_login_status():
+    try:
+        return {"state": auth.codex_login.state(), "providers": auth.status()}
+    except auth.LoginError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/login/codex/cancel")
+def codex_login_cancel():
+    auth.codex_login.cancel()
+    return {"ok": True}
+
+
+@app.post("/api/logout/{provider}")
+def logout(provider: str):
+    auth.logout(_provider_or_400(provider))
+    return {"providers": auth.status()}
+
+
+class NewWorld(BaseModel):
+    provider: str | None = None
+
+
+class Provider(BaseModel):
+    provider: str
 
 
 @app.get("/api/worlds")
@@ -73,8 +115,9 @@ def list_worlds():
 
 
 @app.post("/api/worlds")
-def create_world():
-    return worlds.create()
+def create_world(body: NewWorld | None = None):
+    provider = body.provider if body and body.provider else auth.default_provider()
+    return worlds.create(_provider_or_400(provider))
 
 
 @app.post("/api/worlds/import")
@@ -105,6 +148,16 @@ def get_world(wid: str, mode: str = "play"):
     if mode not in MODES:
         raise HTTPException(400, "bad mode")
     return {**_snapshot(d), "messages": worlds.read_chat(d, mode), "busy": locks[wid].locked()}
+
+
+@app.put("/api/worlds/{wid}/provider")
+def set_world_provider(wid: str, body: Provider):
+    d = _world_or_404(wid)
+    if locks[wid].locked():
+        raise HTTPException(409, "world is busy")
+    if worlds.provider(d) != _provider_or_400(body.provider):
+        worlds.set_provider(d, body.provider)
+    return worlds.read_meta(d)
 
 
 @app.delete("/api/worlds/{wid}")
@@ -153,21 +206,28 @@ async def run_turn(send, d: Path, mode: str, text: str, display: str | None):
     else:
         worlds.append_chat(d, mode, {"role": "user", "text": text})
 
+    provider = worlds.provider(d)
+    if not auth.connected(provider):
+        name = PROVIDER_NAMES[provider]
+        message = (f"This world's game master runs on {name}, which isn't connected. Connect {name} "
+                   "from the top bar, or switch this world to another provider on the home page.")
+        worlds.append_chat(d, mode, {"role": "error", "text": message})
+        await send({"type": "error", "mode": mode, "message": message, **_snapshot(d)})
+        return
+
     sessions = worlds.read_sessions(d)
+    sessions["provider"] = provider
     session_id = sessions.get(mode)
-    resume = session_id is not None
     prompt = text
 
     for attempt in range(2):
-        if not resume:
-            session_id = str(uuid.uuid4())
         tools, final, error, started = [], None, None, False
-        async for ev in runner.run(d, mode, prompt, session_id, resume):
+        async for ev in runner.run(provider, d, mode, prompt, session_id):
             kind = ev["type"]
             if kind == "init":
                 started = True
-                if sessions.get(mode) != session_id:
-                    sessions[mode] = session_id
+                if ev.get("session_id") and sessions.get(mode) != ev["session_id"]:
+                    sessions[mode] = ev["session_id"]
                     worlds.write_sessions(d, sessions)
             elif kind == "result":
                 final = ev
@@ -179,9 +239,9 @@ async def run_turn(send, d: Path, mode: str, text: str, display: str | None):
                 elif kind == "tool_result" and tools:
                     tools[-1]["output"] = ev["output"]
                 await send(ev)
-        if resume and not started and attempt == 0:
-            # Session files are gone (e.g. claude home volume reset): start fresh with a recovery note.
-            resume = False
+        if session_id and not started and attempt == 0:
+            # Session files are gone (e.g. the claude-home volume was reset): start fresh with a recovery note.
+            session_id = None
             prompt = LOST_SESSION_NOTE + text
             continue
         break

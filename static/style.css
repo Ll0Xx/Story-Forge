@@ -56,6 +56,37 @@ code { background: #0003; padding: 1px 5px; border-radius: 4px; font-size: .9em;
 }
 .login-error { color: var(--danger); font-size: 13px; margin: 10px 0 0; word-break: break-word; }
 .btn.small { padding: 4px 10px; font-size: 13px; }
+.login { position: relative; }
+.login .close {
+  position: absolute; top: 10px; right: 12px; background: none; border: 0; color: var(--muted);
+  font-size: 22px; line-height: 1; cursor: pointer;
+}
+.login .close:hover { color: var(--text); }
+.muted.small { font-size: 13px; }
+.providers { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.provider {
+  display: flex; flex-direction: column; gap: 4px; padding: 14px; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text); font: inherit;
+}
+.provider strong { font-size: 16px; }
+.provider .muted { margin: 0 0 8px; flex: 1; }
+.provider.connected { border-color: #6fd39b55; }
+.provider.pick { cursor: pointer; }
+.provider.pick:hover { border-color: var(--accent-2); }
+.provider-ok { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ok); white-space: nowrap; }
+.device-code { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
+.device-code code { font-size: 22px; letter-spacing: 2px; padding: 4px 10px; color: var(--gold); }
+.login .waiting { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+
+.accounts-chip {
+  margin-left: auto; display: flex; gap: 10px; padding: 5px 10px; font: inherit; font-size: 13px; cursor: pointer;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 99px;
+}
+.accounts-chip:hover { border-color: var(--accent-2); }
+.accounts-chip > span { display: flex; align-items: center; gap: 5px; }
+.accounts-chip i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.accounts-chip .on { color: var(--text); }
+.accounts-chip .on i { background: var(--ok); border-color: var(--ok); }
 
 /* ---- buttons ---- */
 .btn {
@@ -89,6 +120,12 @@ code { background: #0003; padding: 1px 5px; border-radius: 4px; font-size: .9em;
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #e8c26a22; color: var(--gold); }
 .badge.ready { background: #6fd39b22; color: var(--ok); }
+.badge.ai {
+  margin: 0 auto 0 6px; border: 0; font: inherit; font-size: 12px; background: #c9a2ff1f; color: var(--accent); cursor: pointer;
+}
+.badge.ai:disabled { cursor: default; }
+.badge.ai:not(:disabled):hover { background: #c9a2ff38; }
+.badge.ai.off { background: #ff6b7a1f; color: var(--danger); }
 
 /* ---- world layout ---- */
 .world { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }

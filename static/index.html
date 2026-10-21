@@ -23,31 +23,99 @@
       </nav>
     </div>
   </template>
+  <button class="accounts-chip" x-show="health && anyConnected()" x-cloak @click="openAccounts()"
+          title="AI accounts">
+    <template x-for="p in providers" :key="p.id">
+      <span :class="{ on: connected(p.id) }"><i></i><span x-text="p.short"></span></span>
+    </template>
+  </button>
 </header>
 
-<div class="login-wrap" x-show="health && !health.auth" x-cloak>
+<!-- AI accounts: first-run choice, and the panel behind the top-bar chip -->
+<div class="login-wrap" x-show="health && (!anyConnected() || accountsOpen)" x-cloak
+     @click.self="anyConnected() && closeAccounts()">
   <div class="login panel">
-    <h3>Connect your Claude account</h3>
-    <p class="muted">Story Forge runs on your Claude subscription (Pro or Max). You only need to do this once per device.</p>
-    <template x-if="!login.url">
-      <button class="btn primary" :disabled="login.busy" @click="loginStart()"
-              x-text="login.busy ? 'Preparing sign-in link…' : 'Connect Claude account'"></button>
-    </template>
-    <template x-if="login.url">
+    <button class="close" x-show="anyConnected()" @click="closeAccounts()" title="Close">×</button>
+
+    <template x-if="!login.provider">
       <div>
+        <h3 x-text="anyConnected() ? 'AI accounts' : 'Choose your AI game master'"></h3>
+        <p class="muted">Story Forge runs on your own AI subscription. You only need to do this once per device.</p>
+        <div class="providers">
+          <template x-for="p in providers" :key="p.id">
+            <div class="provider" :class="{ connected: connected(p.id) }">
+              <strong x-text="p.name"></strong>
+              <span class="muted small" x-text="p.plan"></span>
+              <template x-if="!connected(p.id)">
+                <button class="btn primary" :disabled="login.busy" @click="loginStart(p.id)"
+                        x-text="login.busy === p.id ? 'Preparing…' : `Connect ${p.short}`"></button>
+              </template>
+              <template x-if="connected(p.id)">
+                <div class="provider-ok">
+                  <span>✓ Connected</span>
+                  <button class="btn ghost small" x-show="!health.providers[p.id].from_env"
+                          @click="logout(p.id)">Disconnect</button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <p class="muted small" x-show="!anyConnected()">You can connect the other one later.</p>
+      </div>
+    </template>
+
+    <template x-if="login.provider === 'claude'">
+      <div>
+        <h3>Connect Claude</h3>
         <ol>
           <li>Open <a :href="login.url" target="_blank" rel="noopener">the Claude sign-in page</a> and approve access.</li>
           <li>Copy the code it shows you and paste it here:</li>
         </ol>
-        <form class="login-form" @submit.prevent="loginFinish()">
+        <form class="login-form" @submit.prevent="claudeFinish()">
           <input x-model="login.code" placeholder="Paste the code" autocomplete="off" :disabled="login.busy">
           <button class="btn primary" :disabled="login.busy || !login.code.trim()"
                   x-text="login.busy ? 'Connecting…' : 'Finish'"></button>
         </form>
-        <button class="btn ghost small" @click="login.url = null" :disabled="login.busy">Start over</button>
+        <button class="btn ghost small" @click="loginReset()" :disabled="login.busy">Start over</button>
       </div>
     </template>
+
+    <template x-if="login.provider === 'codex'">
+      <div>
+        <h3>Connect ChatGPT</h3>
+        <ol>
+          <li>Open <a :href="login.url" target="_blank" rel="noopener" x-text="login.url.replace('https://', '')"></a>
+            and sign in.</li>
+          <li>Enter this code:
+            <div class="device-code">
+              <code x-text="login.userCode"></code>
+              <button class="btn ghost small" @click="copyCode()" x-text="login.copied ? 'Copied' : 'Copy'"></button>
+            </div>
+          </li>
+        </ol>
+        <p class="muted waiting"><span class="spinner"></span> Waiting for you to approve…</p>
+        <button class="btn ghost small" @click="loginReset()">Start over</button>
+      </div>
+    </template>
+
     <p class="login-error" x-show="login.error" x-text="login.error"></p>
+  </div>
+</div>
+
+<!-- New world: pick the provider when both are connected -->
+<div class="login-wrap" x-show="picking" x-cloak @click.self="picking = false">
+  <div class="login panel">
+    <button class="close" @click="picking = false" title="Close">×</button>
+    <h3>Who runs the game master?</h3>
+    <p class="muted">This world keeps the choice. You can switch it later from the world card.</p>
+    <div class="providers">
+      <template x-for="p in providers" :key="p.id">
+        <button class="provider pick" @click="createWorld(p.id)">
+          <strong x-text="p.name"></strong>
+          <span class="muted small" x-text="p.plan"></span>
+        </button>
+      </template>
+    </div>
   </div>
 </div>
 
@@ -59,7 +127,7 @@
       <button class="btn" @click="$refs.importFile.click()" :disabled="importing"
               x-text="importing ? 'Importing…' : 'Import world'"></button>
       <input type="file" accept=".zip" x-ref="importFile" hidden @change="importWorld($event)">
-      <button class="btn primary" @click="createWorld()">+ New world</button>
+      <button class="btn primary" @click="newWorld()">+ New world</button>
     </div>
   </div>
   <p class="empty" x-show="!worlds.length">
@@ -70,6 +138,8 @@
       <article class="card">
         <div class="card-top">
           <span class="badge" :class="w.status" x-text="w.status === 'ready' ? 'Ready' : 'In setup'"></span>
+          <button class="badge ai" :class="{ off: health && !connected(w.provider) }" :disabled="!otherProvider(w)"
+                  :title="providerTitle(w)" @click="switchProvider(w)" x-text="providerName(w.provider)"></button>
           <span class="genre" x-text="w.genre"></span>
         </div>
         <h3 x-text="w.name"></h3>

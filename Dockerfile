@@ -1,13 +1,13 @@
 FROM python:3.12-slim
 
-# Node.js (for the Claude Code CLI) + sqlite3 CLI for debugging
+# Node.js (for the Claude Code and Codex CLIs) + sqlite3 CLI for debugging
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates gnupg sqlite3 \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
+RUN npm install -g @anthropic-ai/claude-code @openai/codex && npm cache clean --force
 
 WORKDIR /app
 COPY app/requirements.txt app/requirements.txt
@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r app/requirements.txt
 
 # Claude Code refuses to bypass permissions as root, so run as a normal user.
 RUN useradd -m -u 1000 player \
- && mkdir -p /home/player/.claude /app/worlds \
+ && mkdir -p /home/player/.claude /home/player/.codex /app/worlds \
  && chown -R player:player /home/player /app/worlds
 
 COPY --chown=player:player engine engine
@@ -28,6 +28,7 @@ ENV PYTHONPATH=/app/engine/lib \
     ENGINE_DIR=/app/engine \
     WORLDS_DIR=/app/worlds \
     CLAUDE_CONFIG_DIR=/home/player/.claude \
+    CODEX_HOME=/home/player/.codex \
     DISABLE_AUTOUPDATER=1
 
 USER player

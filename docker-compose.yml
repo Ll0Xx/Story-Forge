@@ -6,14 +6,16 @@ services:
     build: .
     ports:
       - "8000:8000"
-    env_file:                            # optional: CLAUDE_MODEL=sonnet, or a token instead of the in-app login
+    env_file:                            # optional: models, or tokens instead of the in-app login
       - path: .env
         required: false
     volumes:
       - worlds:/app/worlds               # your worlds (export/import them as .zip from the web UI)
       - claude-home:/home/player/.claude # Claude login + conversation history
+      - codex-home:/home/player/.codex   # ChatGPT (Codex) login + conversation history
     restart: unless-stopped
 
 volumes:
   worlds:
   claude-home:
+  codex-home:

@@ -14,6 +14,13 @@ const BEGIN_PROMPT =
   '[Engine: the player pressed "Begin the adventure". Read WORLD.md, memory/recap.md and the db summary, ' +
   'then present the opening scene.]';
 
+const PROVIDERS = [
+  { id: 'claude', name: 'Claude', short: 'Claude', plan: 'Claude Pro or Max plan' },
+  { id: 'codex', name: 'ChatGPT (Codex)', short: 'ChatGPT', plan: 'Paid ChatGPT plan (Plus or higher)' },
+];
+const LOGIN_IDLE = { provider: null, busy: false, url: null, code: '', userCode: '', copied: false, error: '' };
+const json = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
 function app() {
   return {
     view: 'home',
@@ -28,7 +35,11 @@ function app() {
     busy: false,
     input: '',
     health: null,
-    login: { url: null, code: '', busy: false, error: '' },
+    providers: PROVIDERS,
+    login: { ...LOGIN_IDLE },
+    loginTimer: null,
+    accountsOpen: false,
+    picking: false,
     importing: false,
     ws: null,
     pollTimer: null,
@@ -159,9 +170,31 @@ function app() {
       this.scroll();
     },
 
-    async createWorld() {
-      const w = await api('/api/worlds', { method: 'POST' });
+    newWorld() {
+      if (this.providers.every(p => this.connected(p.id))) this.picking = true;
+      else this.createWorld(null);
+    },
+
+    async createWorld(provider) {
+      this.picking = false;
+      const w = await api('/api/worlds', json({ provider }));
       location.hash = `#/w/${w.id}/build`;
+    },
+
+    async switchProvider(w) {
+      const other = this.otherProvider(w);
+      if (!other) return;
+      const name = this.providerName(other);
+      if (!confirm(`Switch "${w.name}" to ${name}?
+
+${name} starts a new conversation and catches up ` +
+                   'from the world files, the recap and the database. Nothing in the world is lost.')) return;
+      try {
+        await api(`/api/worlds/${w.id}/provider`, { ...json({ provider: other }), method: 'PUT' });
+        this.worlds = await api('/api/worlds');
+      } catch (e) {
+        alert(errorText(e));
+      }
     },
 
     async importWorld(event) {
@@ -180,11 +213,61 @@ function app() {
       }
     },
 
-    async loginStart() {
-      Object.assign(this.login, { busy: true, error: '', code: '' });
+    // ---- AI accounts ----
+    connected(id) {
+      return !!(this.health && this.health.providers[id] && this.health.providers[id].connected);
+    },
+
+    anyConnected() {
+      return this.providers.some(p => this.connected(p.id));
+    },
+
+    providerName(id) {
+      return (this.providers.find(p => p.id === id) || {}).short || id;
+    },
+
+    // The provider a world could switch to (only when it is connected).
+    otherProvider(w) {
+      const other = this.providers.find(p => p.id !== w.provider);
+      return other && this.connected(other.id) ? other.id : null;
+    },
+
+    providerTitle(w) {
+      if (!this.connected(w.provider)) return `${this.providerName(w.provider)} is not connected`;
+      const other = this.otherProvider(w);
+      return other ? `Game master: ${this.providerName(w.provider)}. Click to switch to ${this.providerName(other)}.`
+                   : `Game master: ${this.providerName(w.provider)}`;
+    },
+
+    openAccounts() {
+      this.accountsOpen = true;
+    },
+
+    closeAccounts() {
+      this.loginReset();
+      this.accountsOpen = false;
+    },
+
+    // Badges of worlds without a saved provider depend on what is connected.
+    async setProviders(providers) {
+      this.health = { providers };
+      this.login = { ...LOGIN_IDLE };
+      if (this.view === 'home') this.worlds = await api('/api/worlds');
+    },
+
+    loginReset() {
+      clearTimeout(this.loginTimer);
+      if (this.login.provider === 'codex') api('/api/login/codex/cancel', { method: 'POST' }).catch(() => {});
+      this.login = { ...LOGIN_IDLE };
+    },
+
+    async loginStart(provider) {
+      Object.assign(this.login, { busy: provider, error: '', code: '' });
       try {
-        this.login.url = (await api('/api/login/start', { method: 'POST' })).url;
-        window.open(this.login.url, '_blank', 'noopener');
+        const r = await api(`/api/login/${provider}/start`, { method: 'POST' });
+        Object.assign(this.login, { provider, url: r.url, userCode: r.code || '' });
+        window.open(r.url, '_blank', 'noopener');
+        if (provider === 'codex') this.codexPoll();
       } catch (e) {
         this.login.error = errorText(e);
       } finally {
@@ -192,20 +275,45 @@ function app() {
       }
     },
 
-    async loginFinish() {
+    async claudeFinish() {
       Object.assign(this.login, { busy: true, error: '' });
       try {
-        await api('/api/login/finish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: this.login.code }),
-        });
-        this.health = await api('/api/health');
-        this.login.url = null;
+        const r = await api('/api/login/claude/finish', json({ code: this.login.code }));
+        await this.setProviders(r.providers);
       } catch (e) {
-        Object.assign(this.login, { error: errorText(e), url: null });
-      } finally {
-        this.login.busy = false;
+        this.login = { ...LOGIN_IDLE, error: errorText(e) };
+      }
+    },
+
+    // ChatGPT's device login finishes on OpenAI's site; check every few seconds until it does.
+    codexPoll() {
+      clearTimeout(this.loginTimer);
+      this.loginTimer = setTimeout(async () => {
+        if (this.login.provider !== 'codex') return;
+        try {
+          const r = await api('/api/login/codex/status');
+          if (r.state === 'waiting') return this.codexPoll();
+          await this.setProviders(r.providers);
+        } catch (e) {
+          this.login = { ...LOGIN_IDLE, error: errorText(e) };
+        }
+      }, 3000);
+    },
+
+    copyCode() {
+      navigator.clipboard.writeText(this.login.userCode).then(() => {
+        this.login.copied = true;
+        setTimeout(() => (this.login.copied = false), 1500);
+      }).catch(() => {});
+    },
+
+    async logout(provider) {
+      if (!confirm(`Disconnect ${this.providerName(provider)}? Worlds that use it will need it connected again to play.`)) return;
+      try {
+        const r = await api(`/api/logout/${provider}`, { method: 'POST' });
+        await this.setProviders(r.providers);
+      } catch (e) {
+        alert(errorText(e));
       }
     },
 
