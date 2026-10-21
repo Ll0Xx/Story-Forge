@@ -10,10 +10,13 @@ a hero academy or a vampire chronicle tomorrow.
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) and either a Claude Pro or Max
 subscription or a paid ChatGPT plan (Plus or higher).
 
-1. Download this repo (**Code → Download ZIP**, then unpack it) or `git clone` it.
+1. Download the launcher. It's the only file you need:
+   - **Windows:** [StoryForge.bat](https://github.com/Ll0Xx/Story-Forge/releases/latest/download/StoryForge.bat).
+     Your browser may warn about `.bat` files; choose **Keep**.
+   - **macOS / Linux:** [storyforge.sh](https://github.com/Ll0Xx/Story-Forge/releases/latest/download/storyforge.sh)
 2. Start it:
-   - **Windows:** double-click `start.bat`
-   - **macOS / Linux:** run `./start.sh`
+   - **Windows:** double-click `StoryForge.bat`. If Windows says it protected your PC, click **More info → Run anyway**.
+   - **macOS / Linux:** run `sh ~/Downloads/storyforge.sh` in a terminal.
 3. The browser opens http://localhost:8000. Pick your AI game master:
    - **Connect Claude:** sign in, then paste the code back into Story Forge.
    - **Connect ChatGPT:** open the link, sign in and enter the code Story Forge shows. It continues by itself.
@@ -21,7 +24,11 @@ subscription or a paid ChatGPT plan (Plus or higher).
 
 You can connect or disconnect accounts later with the status chip in the top bar.
 
-`start.bat` / `start.sh` also download updates each time they run. Stop the app with `stop.bat` or `docker compose down`.
+The launcher downloads updates each time it runs. Stop the app with `StoryForge.bat stop` / `sh storyforge.sh stop`,
+or stop the `storyforge` container in Docker Desktop.
+
+The launcher keeps its files in `%LOCALAPPDATA%\StoryForge` (Windows) or `~/.storyforge` (macOS / Linux). Your worlds and
+logins are in Docker volumes, so you can move or delete the launcher file at any time.
 
 ## Moving worlds between devices
 
@@ -36,7 +43,8 @@ recap and the database, so nothing in the world is lost.
 
 ## Optional settings
 
-Copy `.env.example` to `.env`, then run `start.bat` again. A plain container restart does **not** re-read `.env`.
+Save [`.env.example`](.env.example) as `.env` in the launcher folder (`%LOCALAPPDATA%\StoryForge` or `~/.storyforge`),
+fill it in, then run the launcher again. A plain container restart does **not** re-read `.env`.
 
 - `CLAUDE_MODEL=sonnet` makes Claude turns faster and uses less of your plan's limits.
 - `CODEX_MODEL=...` picks the model for ChatGPT worlds (anything `codex -m` accepts).
@@ -73,4 +81,7 @@ docker compose exec storyforge sh   # look inside; worlds are in /app/worlds
 ```
 
 Changes to `engine/prompts/` only apply to **new** conversations, because the system prompt is fixed per session.
-Pushing to `main` publishes a new image to `ghcr.io` through GitHub Actions.
+Pushing to `main` publishes a new image to `ghcr.io/ll0xx/story-forge` through GitHub Actions.
+Pushing a tag like `v1.2.0` publishes a release with the launcher files (`launcher/`), which embed a copy of
+`docker-compose.yml`, so keep them in sync. From a clone, `start.bat` / `start.sh` / `stop.bat` run the launcher with the
+repo folder as its settings folder (`.env` next to them).
